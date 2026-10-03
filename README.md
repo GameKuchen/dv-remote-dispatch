@@ -8,6 +8,8 @@ Install the ZIP produced by `package.ps1` with Unity Mod Manager, replacing Remo
 
 Version 1.4.1 fixes the 1.4.0 startup error `You can only patch implemented methods/constructors` from the inherited `DisallowPassing` getter. Pack stop/shunting metadata is corrected directly while dispatch controls the signals, and restored when control ends. Generic getters are no longer patched.
 
+Version 1.4.2 prefers plain `S1` over the Polish `Sz` substitute aspect, even when `Sz` appears first and includes a red lamp. Substitute permissions are excluded from automatic route aspects and indicators. Repeater map colors use both steady and blinking lamps: `Sp1` remains yellow with its identifying white lamp, rather than appearing green on the map.
+
 For multiplayer, install the same Remote Dispatch build, DV Signals, track mods and signal pack on **the host and every client**. The adapter targets AMacro's Multiplayer beta with MultiplayerAPI 1.1.0. Multiplayer supplies `MultiplayerAPI.dll`; do not copy another API DLL from a build folder into the game. Dispatchers should use the host's browser console.
 
 ## Dispatching
@@ -28,7 +30,7 @@ Permission persists until another click or the **Rangierhalt** button revokes it
 
 Zoom in to show signals (zoom level 16 and above). Main and shunting markers are offset so overlapping heads can be selected separately. Arrows show the train's direction of travel, derived from the track geometry rather than the signal model. Hover a marker for its name and aspect. Active routes are green, shunting routes purple, and the preview dashed yellow.
 
-Signal arrows use the corrected travel direction: DV Signals placement direction points towards the approaching train. Signal markers are created only near the visible map area; aspect changes update existing markers, while unchanged routes and switches keep their overlays. Initial map data loads once, and subsequent aspect updates omit signal geometry. Identical multiplayer snapshots do not trigger map redraws. Multiplayer peers must all update to **1.4.1**, which uses snapshot protocol **3** for shunting permissions and occupancy.
+Signal arrows use the corrected travel direction: DV Signals placement direction points towards the approaching train. Signal markers are created only near the visible map area; aspect changes update existing markers, while unchanged routes and switches keep their overlays. Initial map data loads once, and subsequent aspect updates omit signal geometry. Identical multiplayer snapshots do not trigger map redraws. Multiplayer peers must all update to **1.4.2**, which uses snapshot protocol **3** for shunting permissions and occupancy.
 
 ## Cancellation and Hilfsauflösung
 
@@ -49,7 +51,7 @@ Client browser consoles display host state but reject route commands. Use the ho
 - Path search returns up to 32 alternatives with bounded work. Truncated searches are identified; use closer endpoints to inspect more paths.
 - Changing a signal layout during an active route holds signals at stop. Release routes before changing packs or track mods.
 - Both assemblies compile against game DLLs without warnings. The source-linked harness passes 93 backend assertions, including actual aspect-selection rules, manual shunting, switch release before the destination, occupancy/body clearance, and multiplayer snapshots. The DOM frontend harness passes 42 assertions, including manual signal controls, a 5,004-signal viewport test, and checks that unchanged updates preserve markers and overlays.
-- The native regression harness reproduces the rejected 1.4.0 getter patch using the installed Harmony 2.3.6 DLL, then passes 209 assertions across 23 real DV Signals aspect types. It checks corrected stop/shunting metadata and permission-condition patches without Unity rendering.
+- The native regression harness reproduces the rejected 1.4.0 getter patch using the installed Harmony 2.3.6 DLL, then passes 226 assertions across 23 real DV Signals aspect types. It checks corrected stop/shunting metadata, exclusion of substitute permission, steady/blinking repeater colors and permission-condition patches without Unity rendering.
 - In-game verification by the contributor covers signal rendering, vehicle clearance, manual shunting, auxiliary release, multiplayer synchronization and map responsiveness.
 
 ## Building

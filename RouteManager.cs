@@ -677,7 +677,8 @@ namespace DvMod.RemoteDispatch
         public static int GetAspect(DvSignal signal)
         {
             var values = DispatchNetwork.Authority ? aspects : remoteAspects;
-            return failure.Length == 0 && !remoteMismatch && values.TryGetValue(signal.Id, out var aspect) && aspect < signal.AllAspects.Length ? aspect : SignalIntegration.StopAspect(signal);
+            return failure.Length == 0 && !remoteMismatch && values.TryGetValue(signal.Id, out var aspect) &&
+                aspect < signal.AllAspects.Length && !SignalIntegration.IsSubstituteAspect(signal, aspect) ? aspect : SignalIntegration.StopAspect(signal);
         }
         private static JObject DraftJson(Draft draft) => new JObject {
             ["id"] = draft.Id, ["start"] = draft.Start.Id, ["end"] = draft.End.Id,
@@ -710,13 +711,7 @@ namespace DvMod.RemoteDispatch
         {
             int index = GetAspect(signal);
             var aspect = index >= 0 ? signal.AllAspects[index] : null;
-            string colour = aspect == null || aspect.DisallowPassing ? "red" : signal.IsShunting ? "white" :
-                aspect.GetDefinition().UsePassingSpeed || aspect.Id.IndexOf("caution", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                aspect.Id.IndexOf("yellow", StringComparison.OrdinalIgnoreCase) >= 0 ? "yellow" : "green";
-            // Use the signal pack's actual active lamp color when it has a single lamp.
-            var lamps = aspect?.GetDefinition().OnLights;
-            if (lamps != null && lamps.Length == 1)
-                colour = "#" + ColorUtility.ToHtmlStringRGB(lamps[0].Colour);
+            string colour = SignalIntegration.AspectColour(signal, index);
             return new JObject {
                 ["id"] = signal.Id, ["aspect"] = aspect?.Id ?? "off",
                 ["colour"] = IsShuntingAllowed(signal) ? "white" : colour, ["stop"] = !IsShuntingAllowed(signal) && (aspect == null || index == SignalIntegration.StopAspect(signal) || aspect.DisallowPassing),

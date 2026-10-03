@@ -193,6 +193,8 @@ namespace DvMod.RemoteDispatch
         public static int ShuntingAspect(Signals.Game.Signal s) => s.IsShunting ? 1 : 0;
         public static int StopAspect(Signals.Game.Signal s) => 0;
         public static int Evaluate(Signals.Game.Signal s, bool shunting) => 1;
+        public static bool IsSubstituteAspect(Signals.Game.Signal s, int index) => index >= 0 && index < s.AllAspects.Length && s.AllAspects[index].Id == "Sz";
+        public static string AspectColour(Signals.Game.Signal s, int index) => index <= 0 ? "red" : "green";
         public static bool CanSelect(Signals.Game.Signal s, bool shunting) => s.Parent == null && s.Controller.PlacementInfo.HasValue && (shunting || !s.IsShunting);
     }
 }

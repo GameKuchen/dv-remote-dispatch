@@ -4,7 +4,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>RemoteDispatch.Multiplayer</AssemblyName>
-    <InformationalVersion>1.4.1</InformationalVersion>
+    <InformationalVersion>1.4.2</InformationalVersion>
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
   </PropertyGroup>
   <ItemGroup>

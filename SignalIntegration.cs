@@ -18,6 +18,7 @@ namespace DvMod.RemoteDispatch
         private static Harmony? patcher;
         private static readonly HashSet<Type> shuntingTypes = new HashSet<Type>();
         private static readonly Dictionary<IAspect, DvSignal> shuntingOwners = new Dictionary<IAspect, DvSignal>();
+        private static readonly HashSet<IAspect> substituteAspects = new HashSet<IAspect>();
         private static readonly Dictionary<AspectBaseDefinition, bool> originalRestrictions = new Dictionary<AspectBaseDefinition, bool>();
         private static readonly Dictionary<DvSignal, bool> originalShunting = new Dictionary<DvSignal, bool>();
         private static readonly Dictionary<DvSignal, SignalAspectInfo[]> aspectInfo = new Dictionary<DvSignal, SignalAspectInfo[]>();
@@ -60,6 +61,7 @@ namespace DvMod.RemoteDispatch
             originalRestrictions.Clear();
             aspectInfo.Clear();
             shuntingOwners.Clear();
+            substituteAspects.Clear();
         }
         private static void BeforeShuntingStatus(DvSignal __instance, ref bool allowed)
         {
@@ -68,13 +70,16 @@ namespace DvMod.RemoteDispatch
         private static bool BeforeShuntingCondition(ShuntingAllowedAspect __instance, ref bool __result)
         {
             if (!RouteManager.Controlling) return true;
+            if (substituteAspects.Contains(__instance)) { __result = false; return false; }
             bool allowed = RouteManager.IsShuntingAllowed(__instance.Signal);
             __result = __instance.Definition.Invert ? !allowed : allowed;
             return false;
         }
         private static bool BeforePermissionAspect(IAspect __instance, ref bool __result)
         {
-            if (!RouteManager.Controlling || !shuntingOwners.TryGetValue(__instance, out var signal)) return true;
+            if (!RouteManager.Controlling) return true;
+            if (substituteAspects.Contains(__instance)) { __result = false; return false; }
+            if (!shuntingOwners.TryGetValue(__instance, out var signal)) return true;
             // Top-level shunting lamps/indicators must not inherit path, reservation or occupancy conditions.
             __result = RouteManager.IsShuntingAllowed(signal);
             return false;
@@ -124,15 +129,7 @@ namespace DvMod.RemoteDispatch
         private static SignalAspectInfo[] GetAspectInfo(DvSignal signal)
         {
             if (aspectInfo.TryGetValue(signal, out var info)) return info;
-            info = signal.AllAspects.Select(a => {
-                var d = a.GetDefinition();
-                return new SignalAspectInfo {
-                    Id = a.Id, DisallowPassing = a.DisallowPassing, ShuntingPermission = IsShuntingAspect(d),
-                    ShuntingDenied = d is ShuntingAllowedAspectDefinition s && s.Invert,
-                    StopLamp = d.OnLights.Any(l => (l.Colour.r > .65f && l.Colour.g < .4f && l.Colour.b < .4f) ||
-                        (l.Colour.b > .65f && l.Colour.r < .4f && l.Colour.g < .5f))
-                };
-            }).ToArray();
+            info = signal.AllAspects.Select(SignalNativeAspects.Describe).ToArray();
             aspectInfo.Add(signal, info);
             if (RouteManager.Controlling && signal.Parent == null && signal.Controller.Type != SignalType.Distant &&
                 signal.Controller.Type != SignalType.Repeater)
@@ -144,9 +141,11 @@ namespace DvMod.RemoteDispatch
                         if (!originalRestrictions.ContainsKey(definition)) originalRestrictions.Add(definition, original);
                     });
             }
-            foreach (var aspect in signal.AllAspects.Concat(signal.AllIndicators).Where(a => IsShuntingAspect(a.GetDefinition())))
+            foreach (var aspect in signal.AllAspects.Concat(signal.AllIndicators).Where(a =>
+                SignalNativeAspects.IsShunting(a.GetDefinition()) || SignalNativeAspects.IsSubstitute(a.GetDefinition())))
             {
-                shuntingOwners[aspect] = signal;
+                if (SignalNativeAspects.IsSubstitute(aspect.GetDefinition())) substituteAspects.Add(aspect);
+                else shuntingOwners[aspect] = signal;
                 var type = aspect.GetType();
                 if (type != typeof(ShuntingAllowedAspect) && patcher != null && !shuntingTypes.Contains(type))
                 {
@@ -157,12 +156,10 @@ namespace DvMod.RemoteDispatch
             }
             return info;
         }
-        private static bool ShuntingCondition(AspectBaseDefinition definition) =>
-            definition is ShuntingAllowedAspectDefinition shunting && !shunting.Invert ||
-            definition is CombinationAspectDefinition combination && combination.Conditions.Any(ShuntingCondition);
-        private static bool IsShuntingAspect(AspectBaseDefinition definition) => ShuntingCondition(definition) ||
-            definition.Id.Equals("Ms2", StringComparison.OrdinalIgnoreCase) ||
-            definition.OnLights.Length > 0 && definition.OnLights.All(l => l.Colour.r > .65f && l.Colour.g > .65f && l.Colour.b > .65f);
+        public static bool IsSubstituteAspect(DvSignal signal, int index) =>
+            index >= 0 && index < signal.AllAspects.Length && GetAspectInfo(signal)[index].SubstitutePermission;
+        public static string AspectColour(DvSignal signal, int index) =>
+            index >= 0 && index < signal.AllAspects.Length ? GetAspectInfo(signal)[index].Colour : "red";
         public static int ShuntingAspect(DvSignal signal)
         {
             // Combined main signals may show shunting through an additional white indicator, while the main aspect stays red.
@@ -182,9 +179,7 @@ namespace DvMod.RemoteDispatch
             EvaluatingShunting = shunting;
             try
             {
-                for (int i = 0; i < signal.AllAspects.Length; i++)
-                    if (signal.AllAspects[i].MeetsConditions()) return i;
-                return StopAspect(signal);
+                return SignalNativeAspects.Evaluate(signal.AllAspects, GetAspectInfo(signal), StopAspect(signal));
             }
             finally { Evaluating = previous; EvaluatingShunting = previousShunting; }
         }
