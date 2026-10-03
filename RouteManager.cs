@@ -295,8 +295,9 @@ namespace DvMod.RemoteDispatch
             return covered;
         }
         public static bool IsShuntingAllowed(DvSignal signal) => Controlling && failure.Length == 0 && !remoteMismatch &&
-            (DispatchNetwork.Authority ? !shuntingStopped.Contains(signal.Id) && (manualShunting.Contains(signal.Id) || routes.Any(r => r.Draft.Shunting &&
-                !r.Faulted && !r.ReleaseAt.HasValue && r.Draft.Signals.ContainsKey(signal.Id) && !r.PassedSignals.Contains(signal.Id.ToString()))) : remoteShunting.Contains(signal.Id));
+            (DispatchNetwork.Authority ? !shuntingStopped.Contains(signal.Id) && (manualShunting.Contains(signal.Id) || routes.Any(r =>
+                !r.Faulted && !r.ReleaseAt.HasValue && r.Draft.Signals.ContainsKey(signal.Id) &&
+                (r.Draft.Shunting || SignalIntegration.IsShuntingHead(signal)) && !r.PassedSignals.Contains(signal.Id.ToString()))) : remoteShunting.Contains(signal.Id));
         public static JObject SetManualShunting(int id, bool allowed, string username)
         {
             EnsureAuthority();
@@ -324,7 +325,9 @@ namespace DvMod.RemoteDispatch
                 draft.Ranges[node.Track] = dir == TrackDirection.Out ? (from, to) : (node.Length - to, node.Length - from);
                 foreach (var signal in signals.Values)
                 {
-                    if (!SignalIntegration.CanSelect(signal, draft.Shunting) || signal.Id == draft.End.Id) continue;
+                    // Standalone shunting heads on a main route must permit the train to pass too.
+                    bool throughShunting = !draft.Shunting && SignalIntegration.IsShuntingHead(signal) && SignalIntegration.CanManualShunt(signal);
+                    if ((!SignalIntegration.CanSelect(signal, draft.Shunting) && !throughShunting) || signal.Id == draft.End.Id) continue;
                     var placement = signal.Controller.PlacementInfo!.Value;
                     if (NodeId(TrackId(placement.Track), TravelDirection(placement)) != node.Id) continue;
                     double position = offset + DirectedSpan(placement);
@@ -333,7 +336,7 @@ namespace DvMod.RemoteDispatch
                     if (signal.Controller is JunctionSignalController jc)
                     {
                         int jid = Array.IndexOf(RailTrackRegistry.Instance.OrderedJunctions, jc.Junction);
-                        var array = draft.Shunting ? jc.ShuntingSignals : jc.Signals;
+                        var array = jc.ShuntingSignals.Contains(signal) ? jc.ShuntingSignals : jc.Signals;
                         if (array.Length > 1 && draft.Path.Switches.TryGetValue(jid, out var branch) &&
                             Array.IndexOf(array, signal) != branch % array.Length) continue;
                     }
@@ -641,10 +644,11 @@ namespace DvMod.RemoteDispatch
                 {
                     if (!signals.TryGetValue(item.Key, out var signal)) continue;
                     signal.Controller.UpdateBlocks();
+                    bool shunting = route.Draft.Shunting || SignalIntegration.IsShuntingHead(signal);
                     bool allowed = route.State != "releasing" && !route.Faulted && failure.Length == 0 &&
-                        !route.PassedSignals.Contains(item.Key.ToString()) && (!route.Draft.Shunting || IsShuntingAllowed(signal));
+                        !route.PassedSignals.Contains(item.Key.ToString()) && (!shunting || IsShuntingAllowed(signal));
                     aspects[item.Key] = manualShunting.Contains(item.Key) && failure.Length == 0 ? SignalIntegration.ShuntingAspect(signal) :
-                        allowed ? (route.Draft.Shunting ? SignalIntegration.ShuntingAspect(signal) : SignalIntegration.Evaluate(signal, false)) : SignalIntegration.StopAspect(signal);
+                        allowed ? (shunting ? SignalIntegration.ShuntingAspect(signal) : SignalIntegration.Evaluate(signal, false)) : SignalIntegration.StopAspect(signal);
                     SignalIntegration.Apply(signal, aspects[item.Key]);
                 }
             foreach (var signal in signals.Values)

@@ -284,9 +284,89 @@ static class Tests
         Check(start.CurrentAspectIndex == 0 && RouteManager.TryGetLock(split, out _), "Hold signals and switches on incompatible multiplayer layouts.");
         Check(((string)RouteManager.GetState()["error"]!).Contains("layouts differ"), "Explain multiplayer layout mismatch.");
     }
+    static void ThroughShuntingCases()
+    {
+        World();
+        var tm = Signal(3, b, 50, true);
+        var opposite = Signal(4, b, 55, true);
+        opposite.Controller.PlacementInfo = new SignalPlacementInfo { Track = b, Span = 55, Direction = TrackDirection.Out };
+        var alternate = Signal(5, d, 50, true);
+        var beyondDestination = Signal(6, c, 80, true);
+        var atDestination = Signal(7, c, 50, true);
+        Tick();
+        var preview = RouteManager.Preview(1, 2, false);
+        Check(((JArray)preview["candidates"]![0]!["signals"]!).Any(v => (int)v == 3), "Include an intermediate Tm in a normal Fahrstraße.");
+        string id = RouteManager.Establish((string)preview["candidates"]![0]!["id"]!, "dispatcher")["id"]!.Value<string>()!;
+        Check(start.CurrentAspectIndex == 1 && !start.ShuntingAllowed && tm.CurrentAspectIndex == 1 && tm.ShuntingAllowed,
+            "Normal route keeps its main entrance aspect and authorizes intermediate Tm white.");
+        Check(!opposite.ShuntingAllowed && !alternate.ShuntingAllowed && !beyondDestination.ShuntingAllowed && !atDestination.ShuntingAllowed,
+            "Do not authorize opposing heads, other paths or Tm at/beyond the destination.");
+        RouteManager.SetManualShunting(3, false, "dispatcher");
+        Check(!tm.ShuntingAllowed && tm.CurrentAspectIndex == 0 && RouteManager.HasLocks, "Rangierhalt stops a through Tm without releasing the normal route.");
+        RouteManager.SetManualShunting(3, true, "dispatcher");
+        RouteManager.Cancel(id, true, "dispatcher");
+        Check(!tm.ShuntingAllowed && tm.CurrentAspectIndex == 0 && RouteManager.HasLocks, "Hilfsauflösung stops intermediate Tm immediately.");
+        World(); tm = Signal(3, b, 50, true); Tick(); Set();
+        string snapshot = RouteManager.NetworkSnapshot();
+        World(); tm = Signal(3, b, 50, true); Tick(); DispatchNetwork.Connected = true; DispatchNetwork.Host = false;
+        RouteManager.ReceiveSnapshot(snapshot);
+        Check(tm.ShuntingAllowed && tm.CurrentAspectIndex == 1, "Replicate a normal route's intermediate Tm permission to clients.");
+        World(); tm = Signal(3, b, 50, true); Tick(); Set();
+        Move(engine, a, 25, 21); Tick(); Move(engine, b, 40, 35); Tick();
+        Check(tm.ShuntingAllowed, "Keep through Tm white until the approaching train reaches it.");
+        Move(engine, b, 60, 55); Tick();
+        Check(!tm.ShuntingAllowed && tm.CurrentAspectIndex == 0 && RouteManager.HasLocks, "Return through Tm to stop on train passage, while retaining switch locks.");
+        World(); tm = Signal(3, b, 50, true); Tick(); id = Set(); RouteManager.Cancel(id, false, "dispatcher");
+        Check(!tm.ShuntingAllowed && tm.CurrentAspectIndex == 0, "Cancelling an unused normal route stops its through Tm.");
+        World();
+        var junctionController = new JunctionSignalController {
+            Junction = split, PlacementInfo = new SignalPlacementInfo { Track = a, Span = 70, Direction = TrackDirection.In }
+        };
+        var main = new DvSignal { Id = 3, Name = "Main", Controller = junctionController };
+        var tm0 = new DvSignal { Id = 4, Name = "Tm0", IsShunting = true, Controller = junctionController };
+        var tm1 = new DvSignal { Id = 5, Name = "Tm1", IsShunting = true, Controller = junctionController };
+        junctionController.Signals = new[] { main }; junctionController.ShuntingSignals = new[] { tm0, tm1 };
+        SignalManager.Instance.AllControllers.Add(junctionController); Tick(); id = Set(1);
+        Check(main.CurrentAspectIndex == 1 && !main.ShuntingAllowed && !tm0.ShuntingAllowed && tm1.ShuntingAllowed,
+            "Select the correct shunting head at a multi-head junction independently of the main-head array.");
+        RouteManager.Cancel(id, false, "dispatcher");
+        var shunting = RouteManager.Preview(1, 2, true);
+        RouteManager.Establish((string)shunting["candidates"]![1]!["id"]!, "dispatcher");
+        Check(main.CurrentAspectIndex == 0 && main.ShuntingAllowed && !tm0.ShuntingAllowed && tm1.ShuntingAllowed,
+            "A formal shunting route selects main and shunting junction heads from their own arrays.");
+        World(); tm = Signal(3, c, 40, true); Tick(); Set();
+        Move(engine, a, 25, 21); Tick(); Move(engine, c, 30, 25); Move(wagon, c, 30, 25); Tick(); Tick(2.2);
+        Check(!RouteManager.HasLocks && !tm.ShuntingAllowed && tm.CurrentAspectIndex == 0,
+            "Automatic switch release stops an unpassed through Tm before the destination.");
+    }
+    static void SpawnOccupancyCases()
+    {
+        World(); DispatchNetwork.Connected = true; DispatchNetwork.Host = true;
+        var preview = RouteManager.Preview(1, 2, false);
+        var spawned = new TrainCar { CarGUID = "generated-wagon", Bogies = new[] { new Bogie(), new Bogie() } };
+        Move(spawned, b, 60, 55);
+        TrainCarRegistry.Instance.logicCarToTrainCar.Add("generated-wagon", spawned);
+        Sessions.Tags.Clear(); Tick(.4);
+        Check(((JArray)RouteManager.GetState()["occupiedTracks"]!).Any(v => (string?)v == "B") && Sessions.Tags.Contains("routes"),
+            "A wagon generated after dispatch starts publishes new occupancy even without active routes.");
+        Reject(() => RouteManager.Establish((string)preview["candidates"]![0]!["id"]!, "dispatcher"),
+            "Recheck newly generated wagons when committing a previously clear route preview.");
+        string snapshot = RouteManager.NetworkSnapshot();
+        World(); DispatchNetwork.Connected = true; DispatchNetwork.Host = false; Tick(); RouteManager.ReceiveSnapshot(snapshot);
+        Check(((JArray)RouteManager.GetState()["occupiedTracks"]!).Any(v => (string?)v == "B"),
+            "Clients display host occupancy for generated wagons absent from their local registry.");
+        World(); TrainCarRegistry.Instance.logicCarToTrainCar.Add("generated-wagon", spawned); Tick(.4);
+        Move(spawned, d, 60, 55); Tick(.4);
+        var occupied = (JArray)RouteManager.GetState()["occupiedTracks"]!;
+        Check(occupied.Any(v => (string?)v == "D") && !occupied.Any(v => (string?)v == "B"),
+            "A generated wagon moving between tracks updates occupancy without a route.");
+        TrainCarRegistry.Instance.logicCarToTrainCar.Remove("generated-wagon"); Tick(.4);
+        Check(!((JArray)RouteManager.GetState()["occupiedTracks"]!).Any(v => (string?)v == "D"),
+            "Deleting a generated wagon clears its track indication.");
+    }
     public static void Main()
     {
-        GraphCases(); ManagerCases(); NetworkCases(); ShuntingCases();
+        GraphCases(); ManagerCases(); NetworkCases(); ShuntingCases(); ThroughShuntingCases(); SpawnOccupancyCases();
         Console.WriteLine($"PASS: {assertions} assertions, including route commits, train release and multiplayer snapshots.");
     }
 }
