@@ -15,6 +15,8 @@ const map = L.map('map', {
   zoomControl: false,
 })
 .fitBounds(mapBounds);
+map.createPane('dispatchVehicles').style.zIndex = '420';
+map.createPane('dispatchJunctions').style.zIndex = '430';
 L.control.scale().addTo(map);
 const zoomHome = new L.Control.ZoomHome({
   position: 'topleft',
@@ -486,7 +488,7 @@ function createJunctionMarker(p, junctionId) {
   return L.svgOverlay(
     createJunctionOverlay(junctionId),
     getJunctionOverlayBounds(p),
-    { interactive: true, renderer: canvasRenderer })
+    { interactive: true, renderer: canvasRenderer, pane: 'dispatchJunctions' })
     .addEventListener('click', () => toggleJunction(junctionId) )
     .addTo(map)
     .setZIndex(Math.floor(p[0] * 100000 + p[1] * 100000));
@@ -574,7 +576,7 @@ function createPlayerMarker(id, playerData) {
   playerMarkers.set(id, L.svgOverlay(
     createPlayerOverlay(id, playerData),
     getPlayerOverlayBounds(playerData.position),
-    { interactive: true, bubblingMouseEvents: false })
+    { interactive: true, bubblingMouseEvents: false, pane: 'dispatchVehicles' })
     .addEventListener('click', e => setMarkerToFollow(e.target))
     .addTo(map));
 }
@@ -864,7 +866,7 @@ function createNewCar(carId, carData) {
   const overlay = L.svgOverlay(
     createCarOverlay(carId, carData),
     getCarOverlayBounds(carData),
-    { interactive: true, bubblingMouseEvents: false })
+    { interactive: true, bubblingMouseEvents: false, pane: 'dispatchVehicles' })
     .addEventListener('mouseup', e => followCar(carId, true))
     .addTo(map);
   carMarkers.set(carId, overlay);

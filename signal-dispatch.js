@@ -4,6 +4,12 @@ const dispatchLocks = new Map();
 const routePreviewLayer = L.layerGroup().addTo(map);
 const activeRouteLayer = L.layerGroup().addTo(map);
 const occupiedTrackLayer = L.layerGroup().addTo(map);
+// Shared Canvas draw order changes whenever a route or preview is rebuilt. Keep
+// occupancy above those paths regardless of when each overlay last changed.
+const occupiedTrackPane = map.createPane('dispatchOccupancy');
+occupiedTrackPane.style.zIndex = '410';
+occupiedTrackPane.style.pointerEvents = 'none';
+const occupiedTrackRenderer = L.canvas({ pane: 'dispatchOccupancy' });
 let routeStart, routeEnd, routeCandidates = [], selectedCandidate;
 let dispatchState = { available: false, authority: true, routes: [] };
 let routeBusy = false, previewGeneration = 0;
@@ -162,10 +168,14 @@ async function setManualShunting(id, allowed) {
   } catch (error) { routeMessage(error.message, true); }
   finally { routeBusy = false; }
 }
-function drawPath(layer, candidate, colour, dashed = false) {
+function drawPath(layer, candidate, colour, dashed = false, occupied = false) {
   for (const id of candidate.tracks) {
     const track = trackPolyLines.get(String(id));
-    if (track) L.polyline(track.getLatLngs(), { renderer: canvasRenderer, color: colour, weight: 6, opacity: 0.65, dashArray: dashed ? '8 6' : null, interactive: false }).addTo(layer);
+    if (track) L.polyline(track.getLatLngs(), {
+      renderer: occupied ? occupiedTrackRenderer : canvasRenderer,
+      pane: occupied ? 'dispatchOccupancy' : 'overlayPane',
+      color: colour, weight: 6, opacity: occupied ? 1 : 0.65, dashArray: dashed ? '8 6' : null, interactive: false
+    }).addTo(layer);
   }
 }
 function renderCandidates() {
@@ -223,7 +233,7 @@ function updateDispatchRoutes(state) {
   const occupied = JSON.stringify(state.occupiedTracks || []);
   if (occupied !== lastOccupiedTracks) {
     lastOccupiedTracks = occupied; occupiedTrackLayer.clearLayers();
-    drawPath(occupiedTrackLayer, { tracks: state.occupiedTracks || [] }, '#ef5350');
+    drawPath(occupiedTrackLayer, { tracks: state.occupiedTracks || [] }, '#ef5350', false, true);
     document.getElementById('trackOccupancy').textContent = state.occupiedTracks?.length ?
       `Gleisfreimeldung: ${state.occupiedTracks.length} occupied tracks (red). Normal Fahrstraßen into them are blocked.` : 'Gleisfreimeldung: tracks clear.';
   }

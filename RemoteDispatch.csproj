@@ -4,7 +4,7 @@
     <LangVersion>8.0</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>DvMod.RemoteDispatch</RootNamespace>
-    <InformationalVersion>1.4.2</InformationalVersion>
+    <InformationalVersion>1.4.3</InformationalVersion>
     <DefaultItemExcludes>$(DefaultItemExcludes);tests\node_modules\**;tests\**\bin\**;tests\**\obj\**;Multiplayer\bin\**;Multiplayer\obj\**;dist\**</DefaultItemExcludes>
   </PropertyGroup>
 

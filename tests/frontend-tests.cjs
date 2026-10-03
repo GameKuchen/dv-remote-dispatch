@@ -11,6 +11,7 @@ const layers = [];
 const operations = { icons: 0, positions: 0, tooltips: 0, layerClears: 0 };
 let zoom = 20, viewport = [0, 2];
 const mapEvents = {};
+const panes = new Map();
 let fixtureState = { available: true, authority: true, routes: [], locks: {}, auxiliaryReleaseSeconds: 90 };
 let failure;
 function marker(position, options) {
@@ -27,6 +28,7 @@ const context = vm.createContext({
   document, URL, Map, Set, Date, Number, String, Object, Promise,
   location: new URL('http://localhost:7245'), canvasRenderer: {},
   map: {
+    createPane(name) { const pane = { style: {} }; panes.set(name, pane); return pane; },
     on(events, callback) { for (const event of events.split(' ')) mapEvents[event] = callback; },
     getZoom: () => zoom,
     getBounds: () => ({ pad() { return this; }, contains: position => position[0] >= viewport[0] && position[0] <= viewport[1] })
@@ -38,6 +40,7 @@ const context = vm.createContext({
   trackPolyLines: new Map(['A', 'B', 'C', 'D'].map(id => [id, { getLatLngs: () => [[0, 0], [1, 1]] }])),
   junctionsReady: Promise.resolve(),
   L: {
+    canvas: options => ({ options }),
     layerGroup() { const layer = { paths: [], addTo() { layers.push(this); return this; }, clearLayers() { operations.layerClears++; this.paths = []; } }; return layer; },
     divIcon: x => x,
     marker,
@@ -138,6 +141,13 @@ function check(condition, message) { assert.ok(condition, message); checks++; }
   check(requests.some(r => r.pathname === '/route/1/shunting' && r.query === 'allowed=false'), 'Second click returns the signal to Rangierhalt.');
   context.updateDispatchRoutes({ ...fixtureState, manualShunting: [1], occupiedTracks: ['C'] });
   check(layers[2].paths.length === 1 && document.getElementById('trackOccupancy').textContent.includes('1 occupied'), 'Display occupied target track after formal route release.');
+  const occupiedPath = layers[2].paths[0];
+  context.updateDispatchRoutes({ ...fixtureState, manualShunting: [1], occupiedTracks: ['C'], routes: [{ ...fixtureState.routes[0], tracks: ['A', 'B', 'C'] }] });
+  check(layers[2].paths[0] === occupiedPath && layers[1].paths.length === 3, 'Changing a route preserves unchanged occupancy geometry.');
+  check(occupiedPath.options.renderer !== layers[1].paths[0].options.renderer &&
+    Number(panes.get(occupiedPath.options.pane)?.style.zIndex) > 400,
+    'Occupied track uses a separate canvas above routes, including routes drawn after occupancy.');
+  check(panes.get(occupiedPath.options.pane)?.style.pointerEvents === 'none', 'Occupancy overlay does not intercept train or track clicks.');
   const manualStop = document.querySelector('#manualShuntingList button');
   check(manualStop.textContent === 'Rangierhalt', 'Show an explicit stop action for each manual shunting permission.');
   manualStop.click(); await flush();
@@ -169,6 +179,26 @@ function check(condition, message) { assert.ok(condition, message); checks++; }
     createJunctionShape: branch => `<g data-branch="${branch}"></g>`, createJunctionLabel: () => '<text>J-0</text>'
   });
   const mainScript = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  vm.runInContext(mainScript.slice(mainScript.indexOf("map.createPane('dispatchVehicles')"), mainScript.indexOf('L.control.scale()')), context);
+  const overlayOptions = [];
+  const overlayContext = vm.createContext({
+    map: context.map, canvasRenderer: context.canvasRenderer, metersToDegrees: 1,
+    allCarData: new Map(), carMarkers: new Map(), playerMarkers: new Map(),
+    createCarRow() {}, createCarOverlay() {}, getCarOverlayBounds() {}, updateCarMarker() {},
+    createJunctionOverlay() {}, createPlayerOverlay() {}, getPlayerOverlayBounds() {},
+    L: { svgOverlay(svg, bounds, options) {
+      overlayOptions.push(options);
+      return { addEventListener() { return this; }, addTo() { return this; }, setZIndex() { return this; } };
+    } }
+  });
+  vm.runInContext(mainScript.slice(mainScript.indexOf('function createNewCar('), mainScript.indexOf('function updateCar(')), overlayContext);
+  vm.runInContext(mainScript.slice(mainScript.indexOf('function getJunctionOverlayBounds('), mainScript.indexOf('function updateAllJunctions(')), overlayContext);
+  vm.runInContext(mainScript.slice(mainScript.indexOf('function createPlayerMarker('), mainScript.indexOf('function scrollToTrack(')), overlayContext);
+  overlayContext.createNewCar('wagon', {});
+  overlayContext.createJunctionMarker([0, 0], 0);
+  overlayContext.createPlayerMarker(1, { position: [0, 0] });
+  check(overlayOptions.every(options => Number(panes.get(options.pane)?.style.zIndex) > Number(panes.get('dispatchOccupancy').style.zIndex)),
+    'Vehicle, player and switch overlays remain visible above opaque occupancy lines.');
   vm.runInContext(mainScript.slice(mainScript.indexOf('function updateJunctionOverlay('), mainScript.indexOf('function getJunctionOverlayBounds(')), junctionContext);
   junctionContext.updateJunctionOverlay(0, 0);
   check(branchStyles.length === 2, 'Render both branch styles for the initial junction state.');
